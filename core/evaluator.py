@@ -12,6 +12,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
 from .logger import logger
 from util.common_helper import get_prompt_template, get_llm_client
+from util.tokenhub_adapter import TokenHubError
 
 class BenchmarkEvaluator:
     """통합 벤치마크 평가 클래스"""
@@ -155,7 +156,14 @@ class BenchmarkEvaluator:
                                         f.write(f"Content attr: {repr(raw_pred.content)}\n")
                                     f.write("="*80 + "\n\n")
                         
-                        preds = chain.batch(mini_batch, {"max_concurrency": batch_size})
+                        if self.model_config['provider'] == 'tokenhub':
+                            preds = chain.batch(mini_batch, {"max_concurrency": batch_size},
+                                                return_exceptions=True)
+                            for pred in preds:
+                                if isinstance(pred, Exception) and not isinstance(pred, TokenHubError):
+                                    raise pred
+                        else:
+                            preds = chain.batch(mini_batch, {"max_concurrency": batch_size})
                         
                         # Debug: LLM 응답 로깅
                         if os.getenv("IS_DEBUG", "false").lower() == "true":
@@ -167,13 +175,25 @@ class BenchmarkEvaluator:
                                     f.write(f"LLM RESPONSE: {pred}\n")
                                     f.write("="*80 + "\n\n")
                         
-                        batch_results = [self._make_result(qna, pred) for qna, pred in zip(mini_batch, preds)]
+                        batch_results = [
+                            self._make_failed(qna, str(pred)) if isinstance(pred, TokenHubError)
+                            else self._make_result(qna, pred)
+                            for qna, pred in zip(mini_batch, preds)
+                        ]
                         results.extend(batch_results)
                         
                         # 즉시 저장 (실시간 업데이트)
                         if csv_path and batch_results:
                             self.save_results(batch_results, csv_path, chunk_id=chunk_id)
                         
+                        pbar.update(len(mini_batch))
+                        break
+                    except TokenHubError as e:
+                        logger.error("TokenHub request failed after adapter handling: %s", e)
+                        failed_results = [self._make_failed(qna, str(e)) for qna in mini_batch]
+                        results.extend(failed_results)
+                        if csv_path:
+                            self.save_results(failed_results, csv_path, chunk_id=chunk_id)
                         pbar.update(len(mini_batch))
                         break
                     except RateLimitError:

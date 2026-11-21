@@ -150,6 +150,7 @@ def get_provider_name(model_provider):
     provider_names = {
         "azureopenai": "Azure OpenAI",
         "openai": "OpenAI",
+        "tokenhub": "TokenHub",
         "bedrock": "AWS Bedrock",
         "huggingface": "Hugging Face",
         "azureml": "Azure ML endpoint",
@@ -168,7 +169,14 @@ def get_llm_client(
     if wait_time is None:
         wait_time = float(os.getenv("WAIT_TIME", "30.0"))
 
-    if model_provider == "azureopenai":
+    if model_provider == "tokenhub":
+        from .tokenhub_adapter import get_tokenhub_llm
+
+        return get_tokenhub_llm(
+            temperature=temperature, max_tokens=max_tokens,
+            max_retries=max_retries, wait_time=wait_time, system_prompt=system_prompt,
+        )
+    elif model_provider == "azureopenai":
 
         model_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
         reasoning_effort = os.getenv("REASONING_EFFORT")
@@ -352,7 +360,7 @@ def get_llm_client(
         llm = ChatBedrockConverse(**bedrock_kwargs)
     else:
         raise ValueError(
-            "Invalid 'model_provider' value. Please choose from ['azureopenai', 'openai', 'huggingface', 'azureml', 'azureai', 'bedrock', 'bedrock_openai']"
+            "Invalid 'model_provider' value. Please choose from ['azureopenai', 'openai', 'huggingface', 'azureml', 'azureai', 'bedrock', 'bedrock_openai', 'tokenhub']"
         )
 
     return llm, model_name
